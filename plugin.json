@@ -1,0 +1,384 @@
+{
+  "workflow": {
+    "nodes": [
+      {
+        "id": "plugin-metadata",
+        "type": "modifier",
+        "position": {
+          "x": 240,
+          "y": 160
+        },
+        "data": {
+          "modifier": {
+            "name": "MultiSOM",
+            "key": "multisom",
+            "icon": "HiCube",
+            "author": "Rodolfo Herrera",
+            "license": "Apache-2.0",
+            "version": "1.0.0",
+            "homepage": "https://github.com/rodyherrera/Volterra",
+            "description": "Identificacion estructural por clustering no supervisado con un Self-Organizing Map multicapa. Usa propiedades por atomo generadas por los plugins de features seleccionados (p. ej. centrosymmetry-parameter, coordination-analysis) y agrupa los atomos por cluster_id."
+          }
+        }
+      },
+      {
+        "id": "plugin-arguments",
+        "type": "arguments",
+        "position": {
+          "x": 528,
+          "y": 208
+        },
+        "data": {
+          "arguments": {
+            "arguments": [
+              {
+                "argument": "feature_plugins",
+                "type": "pluginReference",
+                "label": "Feature Plugins",
+                "required": true,
+                "multipleSelection": true,
+                "showPluginConfiguration": true,
+                "pluginReferenceFilterKeys": [
+                  "coordination-analysis",
+                  "centrosymmetry-parameter",
+                  "steinhardt-order-parameters"
+                ]
+              },
+              {
+                "argument": "layers",
+                "type": "list",
+                "label": "SOM Layers",
+                "listItemLabelArgument": "label",
+                "listArguments": [
+                  {
+                    "argument": "label",
+                    "type": "string",
+                    "label": "Label",
+                    "default": "Layer"
+                  },
+                  {
+                    "argument": "features",
+                    "type": "select",
+                    "label": "Features",
+                    "multipleSelection": true,
+                    "optionsFromPluginReference": "feature_plugins"
+                  },
+                  {
+                    "argument": "scaling",
+                    "type": "select",
+                    "label": "Scaling",
+                    "default": "normal",
+                    "options": [
+                      {
+                        "key": "normal",
+                        "label": "Normal (min-max)"
+                      },
+                      {
+                        "key": "standard",
+                        "label": "Standard (z-score)"
+                      },
+                      {
+                        "key": "robust",
+                        "label": "Robust (median/IQR)"
+                      }
+                    ]
+                  },
+                  {
+                    "argument": "f",
+                    "type": "number",
+                    "label": "Training fraction (f)",
+                    "default": 1,
+                    "min": 0.01,
+                    "max": 1,
+                    "step": 0.05
+                  },
+                  {
+                    "argument": "sigma",
+                    "type": "number",
+                    "label": "Sigma (neighborhood width)",
+                    "default": 0.5,
+                    "min": 0.01,
+                    "step": 0.1
+                  },
+                  {
+                    "argument": "eta",
+                    "type": "number",
+                    "label": "Eta (learning rate)",
+                    "default": 0.5,
+                    "min": 0.01,
+                    "step": 0.1
+                  },
+                  {
+                    "argument": "N",
+                    "type": "number",
+                    "label": "N (output neurons / sub-clusters)",
+                    "default": 5,
+                    "min": 2,
+                    "step": 1
+                  },
+                  {
+                    "argument": "batched",
+                    "type": "boolean",
+                    "label": "Batched training",
+                    "default": true
+                  },
+                  {
+                    "argument": "batch_size",
+                    "type": "number",
+                    "label": "Batch size",
+                    "default": 100,
+                    "min": 1,
+                    "step": 1,
+                    "visibleWhen": {
+                      "argument": "batched",
+                      "operator": "equals",
+                      "value": true
+                    }
+                  }
+                ],
+                "default": [
+                  {
+                    "label": "Layer 1",
+                    "features": [
+                      "coordination",
+                      "csp"
+                    ],
+                    "scaling": "normal",
+                    "f": 1,
+                    "sigma": 0.5,
+                    "eta": 0.5,
+                    "N": 5,
+                    "batched": true,
+                    "batch_size": 100
+                  },
+                  {
+                    "label": "Layer 2",
+                    "features": [
+                      "csp"
+                    ],
+                    "scaling": "robust",
+                    "f": 1,
+                    "sigma": 0.7,
+                    "eta": 1.0,
+                    "N": 2,
+                    "batched": true,
+                    "batch_size": 100
+                  }
+                ]
+              },
+              {
+                "argument": "training",
+                "type": "select",
+                "label": "Training Mode",
+                "default": "reference",
+                "options": [
+                  {
+                    "key": "reference",
+                    "label": "Reference frame (stable cluster IDs)"
+                  },
+                  {
+                    "key": "per_frame",
+                    "label": "Per frame (retrain each frame)"
+                  }
+                ]
+              },
+              {
+                "argument": "mapping",
+                "type": "select",
+                "label": "Cluster ID Mapping",
+                "default": "linear",
+                "options": [
+                  {
+                    "key": "linear",
+                    "label": "Linear"
+                  },
+                  {
+                    "key": "godel",
+                    "label": "Godel"
+                  },
+                  {
+                    "key": "default",
+                    "label": "Default"
+                  }
+                ]
+              },
+              {
+                "argument": "seed",
+                "type": "number",
+                "label": "Random Seed",
+                "default": 1982,
+                "min": 0,
+                "step": 1
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "trajectory-context",
+        "type": "context",
+        "position": {
+          "x": 816,
+          "y": 160
+        },
+        "data": {
+          "context": {
+            "source": "trajectory_dumps"
+          }
+        }
+      },
+      {
+        "id": "foreach-trajectory-dumps",
+        "type": "forEach",
+        "position": {
+          "x": 1088,
+          "y": 208
+        },
+        "data": {
+          "forEach": {
+            "iterableSource": "{{ trajectory-context.trajectory_dumps }}"
+          }
+        }
+      },
+      {
+        "id": "feat-node",
+        "type": "plugin-node",
+        "position": {
+          "x": 1392,
+          "y": 208
+        },
+        "data": {
+          "pluginNode": {
+            "executionMode": "argumentReference",
+            "argumentReference": "feature_plugins",
+            "outputPathMode": "isolated"
+          }
+        }
+      },
+      {
+        "id": "analysis-entrypoint",
+        "type": "entrypoint",
+        "position": {
+          "x": 1696,
+          "y": 208
+        },
+        "data": {
+          "entrypoint": {
+            "type": "python-script",
+            "binary": "multisom-plugin.zip",
+            "binaryObjectPath": "__UPLOAD_BINARY_OBJECT_PATH__",
+            "binaryFileName": "multisom-plugin.zip",
+            "entrypointScript": "scripts/multisom_plugin_wrapper.py",
+            "requirementsFile": "numpy\npandas\npyarrow",
+            "arguments": "{{ foreach-trajectory-dumps.outputPath }} {{ plugin-arguments.as_str }} --frameIndex {{ foreach-trajectory-dumps.currentIndex }}",
+            "timeout": -1
+          }
+        }
+      },
+      {
+        "id": "primary-exposure",
+        "type": "exposure",
+        "position": {
+          "x": 2320,
+          "y": 208
+        },
+        "data": {
+          "exposure": {
+            "name": "MultiSOM",
+            "icon": "HiCube",
+            "results": "multisom.parquet",
+            "iterable": ""
+          }
+        }
+      },
+      {
+        "id": "multisom-model-exposure",
+        "type": "exposure",
+        "position": {
+          "x": 2320,
+          "y": 336
+        },
+        "data": {
+          "exposure": {
+            "name": "MultiSOM Model",
+            "icon": "HiCube",
+            "results": "atoms.parquet",
+            "iterable": ""
+          }
+        }
+      },
+      {
+        "id": "multisom-model-export",
+        "type": "export",
+        "position": {
+          "x": 2640,
+          "y": 336
+        },
+        "data": {
+          "export": {
+            "exporter": "AtomisticExporter",
+            "type": "glb"
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-metadata-arguments",
+        "source": "plugin-metadata",
+        "sourceHandle": "output",
+        "target": "plugin-arguments",
+        "targetHandle": "input"
+      },
+      {
+        "id": "edge-arguments-context",
+        "source": "plugin-arguments",
+        "sourceHandle": "output",
+        "target": "trajectory-context",
+        "targetHandle": "input"
+      },
+      {
+        "id": "edge-context-foreach",
+        "source": "trajectory-context",
+        "sourceHandle": "output",
+        "target": "foreach-trajectory-dumps",
+        "targetHandle": "input"
+      },
+      {
+        "id": "edge-foreach-feat-node",
+        "source": "foreach-trajectory-dumps",
+        "sourceHandle": "output",
+        "target": "feat-node",
+        "targetHandle": "input"
+      },
+      {
+        "id": "edge-feat-node-entrypoint",
+        "source": "feat-node",
+        "sourceHandle": "output",
+        "target": "analysis-entrypoint",
+        "targetHandle": "input"
+      },
+      {
+        "id": "edge-entrypoint-primary-exposure",
+        "source": "analysis-entrypoint",
+        "sourceHandle": "output",
+        "target": "primary-exposure",
+        "targetHandle": "input"
+      },
+      {
+        "id": "edge-entrypoint-multisom-model-exposure",
+        "source": "analysis-entrypoint",
+        "sourceHandle": "output",
+        "target": "multisom-model-exposure",
+        "targetHandle": "input"
+      },
+      {
+        "id": "edge-multisom-model-exposure-multisom-model-export",
+        "source": "multisom-model-exposure",
+        "sourceHandle": "output",
+        "target": "multisom-model-export",
+        "targetHandle": "input"
+      }
+    ]
+  }
+}

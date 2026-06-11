@@ -1,0 +1,87 @@
+name: Publish Plugin (Python)
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish to registry
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out plugin repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Validate plugin (imports + smoke test)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install numpy pandas pyarrow
+          python -c "import json, ast; json.load(open('plugin.json')); json.load(open('vpm.json'))"
+          python -c "import ast; ast.parse(open('scripts/multisom_plugin_wrapper.py').read())"
+          python -c "import sys; sys.path.insert(0, '.'); from multisom import run_multisom, apply_multisom; print('multisom import OK')"
+
+      - name: Check plugin.json requirementsFile matches requirements.txt
+        run: |
+          python - <<'EOF'
+          import json
+
+          file_requirements = [line.strip() for line in open('requirements.txt') if line.strip()]
+          nodes = json.load(open('plugin.json'))['workflow']['nodes']
+          entrypoint = next(node for node in nodes if node['type'] == 'entrypoint')
+          inline_requirements = [
+              line.strip()
+              for line in entrypoint['data']['entrypoint']['requirementsFile'].splitlines()
+              if line.strip()
+          ]
+          if file_requirements != inline_requirements:
+              raise SystemExit(
+                  f"::error::requirements out of sync: requirements.txt {file_requirements} "
+                  f"!= plugin.json requirementsFile {inline_requirements}"
+              )
+          print('requirements in sync:', file_requirements)
+          EOF
+
+      - name: Install vpm
+        run: npm install -g @voltstack/vpm
+
+      - name: Verify committed vpm.json
+        run: test -f vpm.json || { echo "::error::vpm.json is required (the registry manifest)"; exit 1; }
+
+      - name: Pack the plugin
+        id: pack
+        run: |
+          vpm pack --out multisom-plugin.tgz
+          echo "tarball=$(pwd)/multisom-plugin.tgz" >> "$GITHUB_OUTPUT"
+
+      - name: Publish to registry
+        env:
+          VPM_NO_KEYRING: '1'
+          VPM_PUBLISH_TOKEN: ${{ secrets.VPM_PUBLISH_TOKEN }}
+        run: |
+          TGZ="${{ steps.pack.outputs.tarball }}"
+          # Same cross-platform tarball under every platform tag. The daemon only
+          # ever fetches `linux-x86_64`; the other two serve `vpm install` on
+          # macOS / Windows. vpm.json deliberately omits `platforms` so publish
+          # does not enforce a fixed set.
+          vpm publish --token "$VPM_PUBLISH_TOKEN" \
+            --bundle linux-x86_64="$TGZ" \
+            --bundle darwin-arm64="$TGZ" \
+            --bundle windows-x86_64="$TGZ"

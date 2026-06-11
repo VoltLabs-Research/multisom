@@ -1,0 +1,23 @@
+{
+  "name": "@voltlabs/multisom",
+  "version": "1.0.0",
+  "kind": "workflow",
+  "publisher": "voltlabs",
+  "description": "Unsupervised structure identification via a multilayer Self-Organizing Map. Consumes per-atom features produced by user-selected feature plugins (e.g. centrosymmetry-parameter, coordination-analysis) and groups atoms by cluster_id.",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/voltlabs-research/multisom",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/voltlabs-research/multisom"
+  },
+  "entrypoints": {
+    "workflow": "plugin.json"
+  },
+  "files": [
+    "plugin.json",
+    "scripts",
+    "volt",
+    "multisom",
+    "requirements.txt"
+  ]
+}
