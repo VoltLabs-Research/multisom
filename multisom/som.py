@@ -17,6 +17,8 @@ Copyright 2021 Franco Aquistapace
 import numpy as np
 import pandas as pd
 
+from .log import Progress
+
 
 #This function is the learning rate
 # @param t expects an int or float value
@@ -135,22 +137,28 @@ class SOM(object):
     
     
     #Now lets define the training process
-    def train(self, data):
+    def train(self, data, progress_label=None):
         # @param data expects an ndarray or DataFrame
+        # @param progress_label names the progress lines of a long training
         if isinstance(data, np.ndarray):
             n = data.shape[0]
+            progress = Progress(progress_label, n, 'samples')
             for i in range(n):
                 self.update(data[i,:],i+1)
+                progress.update(i + 1)
                 
         elif isinstance(data, pd.DataFrame):
             n = data.shape[0]
             new_data = data.to_numpy()
+            progress = Progress(progress_label, n, 'samples')
             if self.outputLayerSize <= 2:
                 for i in range(n):
                     self.old_update(new_data[i,:],i+1)
+                    progress.update(i + 1)
             else:
                 for i in range(n):
                     self.update(new_data[i,:],i+1)
+                    progress.update(i + 1)
         else:
             raise TypeError('data must be a numpy.ndarray or pandas.DataFrame')
             
@@ -313,8 +321,9 @@ class SOM_Batched(object):
     
     
     #Now lets define the training process
-    def train(self, data):
+    def train(self, data, progress_label=None):
         # @param data expects an ndarray or DataFrame
+        # @param progress_label names the progress lines of a long training
         if isinstance(data, np.ndarray):
             print('Numpy arrays not supported yet')
             exit()
@@ -327,6 +336,7 @@ class SOM_Batched(object):
             # and execute the update equation for each batch
             B_size = self.batch_size
             batches = n//B_size
+            progress = Progress(progress_label, batches, 'batches')
             for batch_n in range(batches):
                 if batch_n == (batches - 1): # Last batch
                     batch_data = data.iloc[batch_n*B_size : n]
@@ -339,6 +349,7 @@ class SOM_Batched(object):
                 # let's calculate the distances with respect
                 # to the output neurons and update the network
                 self.batch_update(batch_data.to_numpy(), batch_n + 1)
+                progress.update(batch_n + 1)
         else:
             raise TypeError('data must be a numpy.ndarray or pandas.DataFrame')
             
