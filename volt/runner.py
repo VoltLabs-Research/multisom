@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 
+from multisom.log import Stopwatch, log
 from .features import load_features
 from .interface import OPTIONS
 from . import labeling, outputs
@@ -7,6 +8,8 @@ from . import labeling, outputs
 import numpy as np
 import argparse
 import json
+
+MAX_LISTED_CLUSTERS = 20
 
 @dataclass(frozen=True)
 class RunConfig:
@@ -50,15 +53,41 @@ def parse_args(args: list[str]) -> RunConfig:
 
 def run(args: list[str]) -> dict:
     config = parse_args(args)
-    frame = load_features(config.feature_paths, config.features)
-    cluster_id, layer_columns = labeling.label_atoms(frame, config)
+    run_timer = Stopwatch()
+    log(f'Parameters: layers={len(config.layers)}, training={config.training}, mapping={config.mapping}, '
+        f'seed={config.seed}, frameIndex={config.frame_index}')
 
-    return {
+    timer = Stopwatch()
+    frame = load_features(config.feature_paths, config.features)
+    log(f'Loaded {len(frame)} atoms x {len(config.features)} features ({", ".join(sorted(config.features))}) '
+        f'from {len(config.feature_paths)} table(s) in {timer.elapsed()}')
+
+    timer.restart()
+    cluster_id, layer_columns = labeling.label_atoms(frame, config)
+    _log_clusters(cluster_id, timer)
+
+    atoms_path = outputs.write_atoms_parquet(config.output_base, frame, cluster_id, layer_columns)
+    log(f'Exported atoms data to: {atoms_path}')
+    summary_path = outputs.write_summary_parquet(config.output_base, cluster_id, len(layer_columns), sorted(config.features))
+    log(f'Summary parquet written to {summary_path}')
+
+    result = {
         'ok': True,
         'outputBase': config.output_base,
-        'outputs': [
-            outputs.write_atoms_parquet(config.output_base, frame, cluster_id, layer_columns),
-            outputs.write_summary_parquet(config.output_base, cluster_id, len(layer_columns), sorted(config.features))
-        ],
+        'outputs': [atoms_path, summary_path],
         'num_clusters': len(np.unique(cluster_id))
     }
+    log(f'MultiSOM completed in {run_timer.elapsed()}.')
+    return result
+
+def _log_clusters(cluster_id, timer):
+    counts = np.bincount(cluster_id)
+    present = np.flatnonzero(counts)
+    present = present[np.argsort(-counts[present], kind='stable')]
+    total = len(cluster_id)
+    log(f'Labeled {total} atoms into {len(present)} clusters in {timer.elapsed()}')
+    for value in present[:MAX_LISTED_CLUSTERS]:
+        log(f'  Cluster_{value}: {counts[value]} atoms ({100.0 * counts[value] / total:.1f}%)')
+    rest = present[MAX_LISTED_CLUSTERS:]
+    if len(rest):
+        log(f'  ... and {len(rest)} smaller clusters with {counts[rest].sum()} atoms')
