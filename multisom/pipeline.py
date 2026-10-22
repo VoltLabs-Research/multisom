@@ -19,18 +19,13 @@ that any STDOUT channel the host reserves stays clean.
 The SOM math itself lives untouched in ``multisom.som``.
 """
 
-import sys
 import copy
 
 import numpy as np
 import pandas as pd
 
+from .log import Stopwatch, log, warn
 from .som import SOM, SOM_Batched
-
-
-def _log(message):
-    """Emit a progress line to STDERR (STDOUT is reserved by the host)."""
-    print(message, file=sys.stderr, flush=True)
 
 
 # ----------------------------------------------------------------------------
@@ -225,6 +220,23 @@ def normalize_layers(layers):
     return canonical
 
 
+def _describe_layer(layer):
+    """Inputs and hyperparameters of a canonical layer, for its log line."""
+    features, scaling = layer['features'], layer['scaling']
+    if len(set(scaling)) == 1:
+        inputs = '%s (%s scaling)' % (', '.join(features), scaling[0])
+    else:
+        inputs = ', '.join('%s (%s)' % pair for pair in zip(features, scaling))
+    mode = 'batch size %d' % layer['batch_size'] if layer['batched'] else 'online'
+    return '%s; N=%d, sigma=%s, eta=%s, f=%s, %s' % (
+        inputs, layer['N'], layer['sigma'], layer['eta'], layer['f'], mode)
+
+
+def _keeps_random_weights(som, rows):
+    """SOM_Batched.train runs ``rows // batch_size`` batches: none below one batch."""
+    return isinstance(som, SOM_Batched) and rows < som.batch_size
+
+
 # ----------------------------------------------------------------------------
 # Model (de)serialization helpers — used by the reference-frame training mode
 # ----------------------------------------------------------------------------
@@ -272,7 +284,8 @@ def _remap_unseen_groups(groups, observed, W1):
     for g in unseen:
         distances = np.linalg.norm(observed_weights - W[:, [g]], axis=0)
         replacements[g] = observed_ints[int(np.argmin(distances))]
-    _log('apply_multisom: remapped unseen SOM groups %s' % replacements)
+    warn('%d atom(s) hit SOM neuron(s) unused in the reference frame; remapped them '
+         'to the nearest used neuron: %s' % (int(values.isin(unseen).sum()), replacements))
     return values.replace(replacements)
 
 
@@ -289,7 +302,7 @@ def _capture_model(mapping, LAYERS, soms, all_min_max_features,
     for i in range(1, len(LAYERS)):
         expected_children = sum(len(group) for group in found_clusters[i - 1])
         if len(found_clusters[i]) != expected_children or len(soms[i]) != expected_children:
-            _log('cannot capture a reusable model: layer %d trained %d child '
+            warn('cannot capture a reusable model: layer %d trained %d child '
                  'SOMs for %d observed parent clusters; every frame will train '
                  'on its own' % (i + 1, len(found_clusters[i]), expected_children))
             return None
@@ -390,7 +403,7 @@ def run_multisom(df, layers, mapping='linear', seed=1982, capture_model=False):
         return SOM(sigma=SIGMAS[i], eta=ETAS[i], size=SIZES[i])
 
     # --- Layer 1 -------------------------------------------------------------
-    _log('Initializing SOM layers...')
+    log('Training MultiSOM: %d layer(s) on %d atoms' % (len(LAYERS), len(df)))
     soms.append([_make_som(0)])
 
     og_df = df.reset_index(drop=True)
@@ -411,8 +424,12 @@ def run_multisom(df, layers, mapping='linear', seed=1982, capture_model=False):
     f = fs[0]
     training_df = og_training_df.sample(frac=f)
 
-    _log('Training SOM, layer 1...')
-    soms[0][0].train(training_df)
+    log('Layer 1: 1 SOM on %d training atoms; %s' % (len(training_df), _describe_layer(LAYERS[0])))
+    if _keeps_random_weights(soms[0][0], len(training_df)):
+        warn('layer 1 has fewer training atoms than its batch size (%d): its SOM '
+             'keeps its random initial weights' % BATCH_SIZES[0])
+    timer = Stopwatch()
+    soms[0][0].train(training_df, progress_label='  Training layer 1 SOM')
 
     norm_df = normalize_data(df=og_df, features=ALL_FEATURES[0],
                              scaling=ALL_SCALES[0],
@@ -426,6 +443,7 @@ def run_multisom(df, layers, mapping='linear', seed=1982, capture_model=False):
     unique_groups = list(groups.unique())
     found_clusters.append([unique_groups])
     mapped_found_clusters = copy.deepcopy(found_clusters)
+    log('Layer 1 trained in %s: %d clusters' % (timer.elapsed(), len(unique_groups)))
 
     first_layer_mapping = {}
     if MAPPING == 'godel':
@@ -446,7 +464,11 @@ def run_multisom(df, layers, mapping='linear', seed=1982, capture_model=False):
 
     # --- Secondary layers ----------------------------------------------------
     for i in range(len(LAYERS) - 1):
-        _log('Training SOMs, layer %d...' % (i + 2))
+        parents = sum(len(group) for group in found_clusters[i])
+        log('Layer %d: 1 SOM per layer-%d cluster (%d SOMs); %s'
+            % (i + 2, i + 1, parents, _describe_layer(LAYERS[i + 1])))
+        timer = Stopwatch()
+        trained = empty = random_weights = training_rows = 0
         layer_name = 'layer_' + str(i + 2)
         new_df[layer_name] = 0.0 if MAPPING == 'linear' else 0
         prev_layer_name = 'layer_' + str(i + 1)
@@ -469,6 +491,7 @@ def run_multisom(df, layers, mapping='linear', seed=1982, capture_model=False):
                 cluster_id = mapped_found_clusters[i][j][k]
                 cluster_data = new_df.loc[new_df[prev_layer_name] == cluster_id].copy()
                 if cluster_data.shape[0] == 0:
+                    empty += 1
                     continue
 
                 som_id = int(k_per_j * j + k)
@@ -484,7 +507,12 @@ def run_multisom(df, layers, mapping='linear', seed=1982, capture_model=False):
                     cluster_data['aux_col'] = cluster_data[ALL_FEATURES[i + 1][0]]
 
                 training_data = cluster_data.sample(frac=f_next)
-                som_group_next[k].train(training_data)
+                trained += 1
+                training_rows += len(training_data)
+                if _keeps_random_weights(som_group_next[k], len(training_data)):
+                    random_weights += 1
+                som_group_next[k].train(training_data, progress_label='  Training layer %d SOM %d/%d'
+                                        % (i + 2, trained + empty, parents))
                 cluster_results = som_group_next[k].predict(cluster_data)
 
                 cluster_result_cols = cluster_results.columns.to_list()
@@ -521,6 +549,14 @@ def run_multisom(df, layers, mapping='linear', seed=1982, capture_model=False):
         soms.append(som_layer_next)
         all_min_max_features.append(min_max_temp)
         found_clusters.append(copy.deepcopy(layer_found_clusters))
+        log('Layer %d trained in %s: %d sub-clusters from %d parent clusters (%d training atoms)'
+            % (i + 2, timer.elapsed(), sum(len(groups) for groups in layer_found_clusters),
+               trained, training_rows))
+        if empty:
+            log('  %d layer-%d cluster(s) matched no atoms and trained no SOM' % (empty, i + 1))
+        if random_weights:
+            warn('%d layer-%d SOM(s) had fewer training atoms than the batch size (%d) and '
+                 'kept their random initial weights' % (random_weights, i + 2, BATCH_SIZES[i + 1]))
 
         # Map the freshly found clusters for use as parents of the next layer
         layer_mapped_found_clusters = copy.deepcopy(layer_found_clusters)
