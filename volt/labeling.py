@@ -1,4 +1,5 @@
 from multisom import apply_multisom, run_multisom
+from multisom.log import Stopwatch, format_duration, log, warn
 from pathlib import Path
 
 import numpy as np
@@ -7,10 +8,10 @@ import pandas as pd
 import hashlib
 import json
 import os
-import sys
 import time
 
 WAIT_SECONDS = 1800
+WAIT_NOTE_SECONDS = 60
 
 def label_atoms(frame, config):
     if config.training != 'reference':
@@ -25,23 +26,23 @@ def label_atoms(frame, config):
 
     model = store.wait()
     if 'core' not in model:
+        log('No reusable shared model: this frame trains its own MultiSOM')
         return _label_per_frame(frame, config)
 
-    print(f'labelling with the shared model {store.path.name}', file=sys.stderr)
+    log(f'Labeling with the shared model {store.path.name} (no training)')
     raw, layer_columns = apply_multisom(frame, model['core'])
     cluster_id, _ = _dense_ids(raw, known=dict(model['dense_map']))
 
     return cluster_id, layer_columns
 
 def _label_per_frame(frame, config):
-    print(f'training MultiSOM: {len(config.layers)} layer(s), mapping={config.mapping}', file=sys.stderr)
     raw, layer_columns = run_multisom(frame, config.layers, mapping=config.mapping, seed=config.seed)
     cluster_id, _ = _dense_ids(raw)
 
     return cluster_id, layer_columns
 
 def _train_reference_model(store, frame, config):
-    print(f'training the reference model: {store.path.name}', file=sys.stderr)
+    log(f'Training the reference model shared by all frames: {store.path.name}')
     model = {}
 
     try:
@@ -57,6 +58,8 @@ def _train_reference_model(store, frame, config):
     finally:
         store.publish(model)
 
+    if model:
+        log(f'Published the reference model {store.path.name}')
     return cluster_id, layer_columns
 
 def _dense_ids(raw, known: dict | None = None):
@@ -100,10 +103,17 @@ class _ModelStore:
         tmp.replace(self.path)
 
     def wait(self) -> dict:
-        print(f'waiting up to {WAIT_SECONDS}s for the shared model {self.path.name}', file=sys.stderr)
+        log(f'Waiting up to {format_duration(WAIT_SECONDS)} for the shared model {self.path.name}...')
+        timer = Stopwatch()
+        next_note = WAIT_NOTE_SECONDS
         deadline = time.monotonic() + WAIT_SECONDS
         while time.monotonic() < deadline:
             if self.path.exists():
+                log(f'Shared model found after {timer.elapsed()}')
                 return json.loads(self.path.read_text())
             time.sleep(1)
+            if timer.seconds() >= next_note:
+                log(f'  Still waiting for the shared model ({timer.elapsed()})')
+                next_note += WAIT_NOTE_SECONDS
+        warn(f'timed out after {format_duration(WAIT_SECONDS)} waiting for the shared model {self.path.name}')
         return {}
