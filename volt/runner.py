@@ -66,14 +66,12 @@ def run(args: list[str]) -> dict:
         frame = load_features(config.feature_paths, config.features)
         log(f'Loaded {len(frame)} atoms x {len(config.features)} features ({", ".join(sorted(config.features))}) '
             f'from {len(config.feature_paths)} table(s) in {timer.elapsed()}')
-        steps.next()
+        steps.next('Labeling atoms with the MultiSOM')
 
         timer.restart()
         cluster_id, layer_columns = labeling.label_atoms(frame, config)
         _log_clusters(cluster_id, timer)
-        steps.next()
-
-        job_progress.set_text('Writing outputs')
+        steps.next('Writing outputs')
         atoms_path = outputs.write_atoms_parquet(config.output_base, frame, cluster_id, layer_columns)
         log(f'Exported atoms data to: {atoms_path}')
         summary_path = outputs.write_summary_parquet(config.output_base, cluster_id, len(layer_columns), sorted(config.features))

@@ -407,6 +407,7 @@ def run_multisom(df, layers, mapping='linear', seed=1982, capture_model=False):
     log('Training MultiSOM: %d layer(s) on %d atoms' % (len(LAYERS), len(df)))
     # Every layer labels all the atoms once, so each is an equal share of the training.
     job_progress.begin_steps([1.0] * len(LAYERS))
+    job_progress.set_text('Training layer 1 of %d' % len(LAYERS))
     soms.append([_make_som(0)])
 
     og_df = df.reset_index(drop=True)
@@ -467,7 +468,7 @@ def run_multisom(df, layers, mapping='linear', seed=1982, capture_model=False):
 
     # --- Secondary layers ----------------------------------------------------
     for i in range(len(LAYERS) - 1):
-        job_progress.next_step()
+        job_progress.next_step('Training layer %d of %d' % (i + 2, len(LAYERS)))
         parents = sum(len(group) for group in found_clusters[i])
         log('Layer %d: 1 SOM per layer-%d cluster (%d SOMs); %s'
             % (i + 2, i + 1, parents, _describe_layer(LAYERS[i + 1])))
