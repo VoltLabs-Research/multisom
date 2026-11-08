@@ -25,6 +25,7 @@ import numpy as np
 import pandas as pd
 
 from .log import Stopwatch, log, warn
+from .progress import job_progress
 from .som import SOM, SOM_Batched
 
 
@@ -404,6 +405,8 @@ def run_multisom(df, layers, mapping='linear', seed=1982, capture_model=False):
 
     # --- Layer 1 -------------------------------------------------------------
     log('Training MultiSOM: %d layer(s) on %d atoms' % (len(LAYERS), len(df)))
+    # Every layer labels all the atoms once, so each is an equal share of the training.
+    job_progress.begin_steps([1.0] * len(LAYERS))
     soms.append([_make_som(0)])
 
     og_df = df.reset_index(drop=True)
@@ -464,9 +467,13 @@ def run_multisom(df, layers, mapping='linear', seed=1982, capture_model=False):
 
     # --- Secondary layers ----------------------------------------------------
     for i in range(len(LAYERS) - 1):
+        job_progress.next_step()
         parents = sum(len(group) for group in found_clusters[i])
         log('Layer %d: 1 SOM per layer-%d cluster (%d SOMs); %s'
             % (i + 2, i + 1, parents, _describe_layer(LAYERS[i + 1])))
+        # One step per SOM of the layer, so each one's training fills its own share.
+        job_progress.begin_steps([1.0] * max(1, parents))
+        visited_clusters = 0
         timer = Stopwatch()
         trained = empty = random_weights = training_rows = 0
         layer_name = 'layer_' + str(i + 2)
@@ -488,6 +495,9 @@ def run_multisom(df, layers, mapping='linear', seed=1982, capture_model=False):
             f_next = fs[i + 1]
 
             for k in range(len(found_clusters[i][j])):
+                if visited_clusters:
+                    job_progress.next_step()
+                visited_clusters += 1
                 cluster_id = mapped_found_clusters[i][j][k]
                 cluster_data = new_df.loc[new_df[prev_layer_name] == cluster_id].copy()
                 if cluster_data.shape[0] == 0:
@@ -549,6 +559,7 @@ def run_multisom(df, layers, mapping='linear', seed=1982, capture_model=False):
         soms.append(som_layer_next)
         all_min_max_features.append(min_max_temp)
         found_clusters.append(copy.deepcopy(layer_found_clusters))
+        job_progress.end_steps()
         log('Layer %d trained in %s: %d sub-clusters from %d parent clusters (%d training atoms)'
             % (i + 2, timer.elapsed(), sum(len(groups) for groups in layer_found_clusters),
                trained, training_rows))
@@ -607,6 +618,7 @@ def run_multisom(df, layers, mapping='linear', seed=1982, capture_model=False):
                         found_clusters[i + 1][j][k])
 
         mapped_found_clusters.append(copy.deepcopy(layer_mapped_found_clusters))
+    job_progress.end_steps()
 
     # --- Assemble outputs ----------------------------------------------------
     layer_columns = {}
