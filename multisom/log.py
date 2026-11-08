@@ -9,6 +9,8 @@ plugins read alike in the panel.
 import sys
 import time
 
+from multisom.progress import job_progress
+
 _NEVER = float('inf')
 
 
@@ -63,6 +65,12 @@ class Progress:
         self._min_interval = min_interval
         self._start = self._last_line = time.monotonic()
         self._next_mark = self._mark_after(0)
+        # The pass also fills the run's current progress step, about 200 times over.
+        self._forward_step = max(1, self.total // 200)
+        self._next_forward = (min(self.total, self._forward_step)
+                              if job_progress.enabled and self.total > 0 else _NEVER)
+        if self._next_forward != _NEVER:
+            job_progress.set_text(label)
 
     def _mark_after(self, done):
         # Item count at which the step after the one ``done`` sits in begins.
@@ -74,8 +82,14 @@ class Progress:
         return -(-self.total * next_percent // 100)
 
     def update(self, done):
+        if done >= self._next_forward:
+            self._forward(done)
         if done >= self._next_mark:
             self._report(done)
+
+    def _forward(self, done):
+        self._next_forward = _NEVER if done >= self.total else min(self.total, done + self._forward_step)
+        job_progress.set_fraction(min(done, self.total) / self.total)
 
     def _report(self, done):
         self._next_mark = self._mark_after(done)
