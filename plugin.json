@@ -15,7 +15,7 @@
             "icon": "HiCube",
             "author": "Rodolfo Herrera",
             "license": "Apache-2.0",
-            "version": "1.2.0",
+            "version": "1.2.1",
             "homepage": "https://github.com/rodyherrera/Volterra",
             "description": "Identificacion estructural por clustering no supervisado con un Self-Organizing Map multicapa. Usa propiedades por atomo generadas por los plugins de features seleccionados (p. ej. centrosymmetry-parameter, coordination-analysis) y agrupa los atomos por cluster_id."
           }
