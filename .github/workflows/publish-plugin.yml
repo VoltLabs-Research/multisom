@@ -77,11 +77,12 @@ jobs:
           VPM_PUBLISH_TOKEN: ${{ secrets.VPM_PUBLISH_TOKEN }}
         run: |
           TGZ="${{ steps.pack.outputs.tarball }}"
-          # Same cross-platform tarball under every platform tag. The daemon only
-          # ever fetches `linux-x86_64`; the other two serve `vpm install` on
-          # macOS / Windows. vpm.json deliberately omits `platforms` so publish
-          # does not enforce a fixed set.
+          # Same cross-platform tarball under every platform tag: a daemon asks for
+          # its host's tag, and one running in a browser or the desktop app asks
+          # for `wasm-wasm32`, whose python3 is Pyodide. vpm.json deliberately
+          # omits `platforms` so publish does not enforce a fixed set.
           vpm publish --token "$VPM_PUBLISH_TOKEN" \
             --bundle linux-x86_64="$TGZ" \
             --bundle darwin-arm64="$TGZ" \
-            --bundle windows-x86_64="$TGZ"
+            --bundle windows-x86_64="$TGZ" \
+            --bundle wasm-wasm32="$TGZ"
