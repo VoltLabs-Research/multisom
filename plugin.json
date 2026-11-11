@@ -12,6 +12,7 @@
           "modifier": {
             "name": "MultiSOM",
             "key": "multisom",
+            "category": "Clustering",
             "icon": "HiCube",
             "author": "Rodolfo Herrera",
             "license": "Apache-2.0",
