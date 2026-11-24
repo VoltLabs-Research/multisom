@@ -5,6 +5,7 @@ Unsupervised structural identification via a multilayer Self-Organizing Map (SOM
 ## Install
 
 ```bash
+npm install -g @voltstack/vpm
 vpm install @voltlabs/multisom
 ```
 
