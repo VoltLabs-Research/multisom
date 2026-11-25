@@ -1,16 +1,14 @@
 from dataclasses import dataclass, field
 
-from multisom.log import Stopwatch, log
 from multisom.progress import ProgressSteps, job_progress
 from .features import load_features
 from .interface import OPTIONS
+from .multisom_log import MultisomLog
 from . import labeling, outputs
 
 import numpy as np
 import argparse
 import json
-
-MAX_LISTED_CLUSTERS = 20
 
 @dataclass(frozen=True)
 class RunConfig:
@@ -54,28 +52,24 @@ def parse_args(args: list[str]) -> RunConfig:
 
 def run(args: list[str]) -> dict:
     config = parse_args(args)
-    run_timer = Stopwatch()
     job_progress.start()
-    log(f'Parameters: layers={len(config.layers)}, training={config.training}, mapping={config.mapping}, '
-        f'seed={config.seed}, frameIndex={config.frame_index}')
+    log = MultisomLog(config)
 
     # Reading the features, training and labeling, then the outputs.
-    with ProgressSteps(1, 8, 1) as steps:
-        job_progress.set_text('Reading the feature tables')
-        timer = Stopwatch()
+    with ProgressSteps(
+        ('Reading the feature tables', 1),
+        ('Labeling atoms with the MultiSOM', 8),
+        ('Writing outputs', 1),
+    ) as steps:
         frame = load_features(config.feature_paths, config.features)
-        log(f'Loaded {len(frame)} atoms x {len(config.features)} features ({", ".join(sorted(config.features))}) '
-            f'from {len(config.feature_paths)} table(s) in {timer.elapsed()}')
-        steps.next('Labeling atoms with the MultiSOM')
+        log.dump(frame)
+        steps.next()
 
-        timer.restart()
-        cluster_id, layer_columns = labeling.label_atoms(frame, config)
-        _log_clusters(cluster_id, timer)
-        steps.next('Writing outputs')
+        cluster_id, layer_columns = labeling.label_atoms(frame, config, log)
+        log.dump(cluster_id)
+        steps.next()
         atoms_path = outputs.write_atoms_parquet(config.output_base, frame, cluster_id, layer_columns)
-        log(f'Exported atoms data to: {atoms_path}')
         summary_path = outputs.write_summary_parquet(config.output_base, cluster_id, len(layer_columns), sorted(config.features))
-        log(f'Summary parquet written to {summary_path}')
 
     result = {
         'ok': True,
@@ -83,18 +77,6 @@ def run(args: list[str]) -> dict:
         'outputs': [atoms_path, summary_path],
         'num_clusters': len(np.unique(cluster_id))
     }
-    log(f'MultiSOM completed in {run_timer.elapsed()}.')
+    log.dump(result)
     job_progress.finish()
     return result
-
-def _log_clusters(cluster_id, timer):
-    counts = np.bincount(cluster_id)
-    present = np.flatnonzero(counts)
-    present = present[np.argsort(-counts[present], kind='stable')]
-    total = len(cluster_id)
-    log(f'Labeled {total} atoms into {len(present)} clusters in {timer.elapsed()}')
-    for value in present[:MAX_LISTED_CLUSTERS]:
-        log(f'  Cluster_{value}: {counts[value]} atoms ({100.0 * counts[value] / total:.1f}%)')
-    rest = present[MAX_LISTED_CLUSTERS:]
-    if len(rest):
-        log(f'  ... and {len(rest)} smaller clusters with {counts[rest].sum()} atoms')

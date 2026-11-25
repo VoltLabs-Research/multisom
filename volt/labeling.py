@@ -1,6 +1,6 @@
 from multisom import apply_multisom, run_multisom
-from multisom.log import Stopwatch, format_duration, log, warn
 from pathlib import Path
+from typing import NamedTuple
 
 import numpy as np
 import pandas as pd
@@ -11,42 +11,39 @@ import os
 import time
 
 WAIT_SECONDS = 1800
-WAIT_NOTE_SECONDS = 60
 
-def label_atoms(frame, config):
+def label_atoms(frame, config, log):
     if config.training != 'reference':
-        return _label_per_frame(frame, config)
+        return _label_per_frame(frame, config, log)
 
     # The first frame of the analyzed sequence (lowest selected timestep) is
     # always the trainer, so the reference model is deterministic. VOLT passes
     # the index via --frameIndex; single-frame runs are always index 0.
-    store = _ModelStore(config)
+    store = ModelStore(config)
     if config.frame_index == 0:
-        return _train_reference_model(store, frame, config)
+        return _train_reference_model(store, frame, config, log)
 
-    model = store.wait()
-    if 'core' not in model:
-        log('No reusable shared model: this frame trains its own MultiSOM')
-        return _label_per_frame(frame, config)
+    model = store.wait(log)
+    log.dump(model)
+    if not model.reusable:
+        return _label_per_frame(frame, config, log)
 
-    log(f'Labeling with the shared model {store.path.name} (no training)')
-    raw, layer_columns = apply_multisom(frame, model['core'])
-    cluster_id, _ = _dense_ids(raw, known=dict(model['dense_map']))
+    raw, layer_columns = apply_multisom(frame, model.content['core'], log)
+    cluster_id, _ = _dense_ids(raw, known=dict(model.content['dense_map']))
 
     return cluster_id, layer_columns
 
-def _label_per_frame(frame, config):
-    raw, layer_columns = run_multisom(frame, config.layers, mapping=config.mapping, seed=config.seed)
+def _label_per_frame(frame, config, log):
+    raw, layer_columns = run_multisom(frame, config.layers, log, mapping=config.mapping, seed=config.seed)
     cluster_id, _ = _dense_ids(raw)
 
     return cluster_id, layer_columns
 
-def _train_reference_model(store, frame, config):
-    log(f'Training the reference model shared by all frames: {store.path.name}')
+def _train_reference_model(store, frame, config, log):
     model = {}
 
     try:
-        raw, layer_columns, core = run_multisom(frame, config.layers, mapping=config.mapping, seed=config.seed, capture_model=True)
+        raw, layer_columns, core = run_multisom(frame, config.layers, log, mapping=config.mapping, seed=config.seed, capture_model=True)
         cluster_id, dense_map = _dense_ids(raw)
 
         if core is not None:
@@ -58,8 +55,7 @@ def _train_reference_model(store, frame, config):
     finally:
         store.publish(model)
 
-    if model:
-        log(f'Published the reference model {store.path.name}')
+    log.dump(PublishedModel(store.path, model))
     return cluster_id, layer_columns
 
 def _dense_ids(raw, known: dict | None = None):
@@ -78,7 +74,25 @@ def _dense_ids(raw, known: dict | None = None):
 
     return labels.map(mapping).to_numpy(np.int32), mapping
 
-class _ModelStore:
+class PublishedModel(NamedTuple):
+    '''
+    The reference model the first frame left for the others: empty when none could be captured.
+    '''
+    path: Path
+    content: dict
+
+class AwaitedModel(NamedTuple):
+    '''
+    The reference model a later frame waited for: None when it never appeared.
+    '''
+    path: Path
+    content: dict | None
+
+    @property
+    def reusable(self) -> bool:
+        return self.content is not None and 'core' in self.content
+
+class ModelStore:
     '''
     Model file shared by every frame of one analysis run.
     '''
@@ -102,18 +116,12 @@ class _ModelStore:
         tmp.write_text(json.dumps(model))
         tmp.replace(self.path)
 
-    def wait(self) -> dict:
-        log(f'Waiting up to {format_duration(WAIT_SECONDS)} for the shared model {self.path.name}...')
-        timer = Stopwatch()
-        next_note = WAIT_NOTE_SECONDS
+    def wait(self, log) -> AwaitedModel:
+        # Each poll that finds no model goes to the log, which notes the wait now and then.
         deadline = time.monotonic() + WAIT_SECONDS
         while time.monotonic() < deadline:
             if self.path.exists():
-                log(f'Shared model found after {timer.elapsed()}')
-                return json.loads(self.path.read_text())
+                return AwaitedModel(self.path, json.loads(self.path.read_text()))
             time.sleep(1)
-            if timer.seconds() >= next_note:
-                log(f'  Still waiting for the shared model ({timer.elapsed()})')
-                next_note += WAIT_NOTE_SECONDS
-        warn(f'timed out after {format_duration(WAIT_SECONDS)} waiting for the shared model {self.path.name}')
-        return {}
+            log.dump(self)
+        return AwaitedModel(self.path, None)

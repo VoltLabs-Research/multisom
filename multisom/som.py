@@ -17,7 +17,7 @@ Copyright 2021 Franco Aquistapace
 import numpy as np
 import pandas as pd
 
-from .log import Progress
+from .progress import Progress
 
 
 #This function is the learning rate
@@ -325,8 +325,7 @@ class SOM_Batched(object):
         # @param data expects an ndarray or DataFrame
         # @param progress_label names the progress lines of a long training
         if isinstance(data, np.ndarray):
-            print('Numpy arrays not supported yet')
-            exit()
+            raise TypeError('Numpy arrays not supported yet')
                 
         elif isinstance(data, pd.DataFrame):
             
