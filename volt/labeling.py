@@ -105,11 +105,12 @@ class ModelStore:
             'features': sorted(config.features)
         }, sort_keys=True, default=str).encode()).hexdigest()[:16]
 
-        # Frame output dirs (<analysisId>-<index>-<random>) of EVERY analysis are
-        # siblings in one daemon-wide dir, so the model is scoped by the analysis
-        # prefix: equal configs from other analyses never share a model.
-        scope = Path(config.output_dir).name.split('-')[0]
-        self.path = Path(config.output_dir).parent / f'.multisom-model-{scope}-{tag}.json'
+        # VOLT's output base of a frame is its output dir (<analysisId>-<index>-<random>),
+        # and those of EVERY analysis are siblings in one daemon-wide dir, so the model is
+        # scoped by the analysis prefix: equal configs from other analyses never share a model.
+        base = Path(config.output_base)
+        scope = base.name.split('-')[0]
+        self.path = base.parent / f'.multisom-model-{scope}-{tag}.json'
 
     def publish(self, model: dict) -> None:
         tmp = self.path.with_suffix(f'.json.tmp-{os.getpid()}')
