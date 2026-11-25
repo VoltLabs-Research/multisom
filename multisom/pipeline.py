@@ -124,26 +124,20 @@ def generate_prime(n):
 
 
 def map_to_cluster_linear(groups_df, c_id, c_next_id,
-                          use_int=False, max_int=None, min_int=None, N=1):
+                          use_int=False, max_int=None, min_int=None):
     """Interpolate child ids into the numeric gap between consecutive parents."""
-    if not use_int:
-        max_val, min_val = groups_df.max(), groups_df.min()
-        if max_val - min_val == 0:
-            delta = c_next_id - c_id
-            lim = (N - 1) / N
-            mapped_df = c_id + delta * lim * groups_df.copy() / (N - 1)
-        else:
-            delta = c_next_id - c_id
-            lim = (max_val / (max_val + 1))
-            mapped_df = c_id + \
-                delta * lim * (groups_df.copy() - min_val) / (max_val - min_val)
-        return mapped_df
-    else:
+    if use_int:
         max_val, min_val = max_int, min_int
-        delta = c_next_id - c_id
-        lim = (max_val / (max_val + 1))
-        mapped_df = c_id + delta * lim * (groups_df - min_val) / (max_val - min_val)
-        return mapped_df
+    else:
+        max_val, min_val = groups_df.max(), groups_df.min()
+    # A child SOM that found a single group leaves no range to interpolate: that group is
+    # the lowest one, which keeps the parent's id as it does in a wider range.
+    span = max_val - min_val
+    if span == 0:
+        span = 1
+    delta = c_next_id - c_id
+    lim = (max_val / (max_val + 1))
+    return c_id + delta * lim * (groups_df - min_val) / span
 
 
 def map_to_cluster_godel(prev_id, layer, group):
